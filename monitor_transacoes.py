@@ -72,3 +72,111 @@ def verificar_transacoes():
     except cx_Oracle.Error as error:
         print(f"Erro ao conectar ou executar a consulta no Oracle: {error}")
         return None
+
+def enviar_email(inconsistencias):
+    """
+    Formata e envia um e-mail com a lista de inconsistências.
+    """
+    if not inconsistencias:
+        return
+    
+    # Monta o corpo do e-mail em HTML para melhor formatação
+    corpo_html = """
+    <html>
+    <head>
+        <style>
+            body { font-family: sans-serif; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #dddddd; text-align: left; padding: 8px; }
+            th { background-color: #f2f2f2; }
+        </style>
+    </head>
+    <body>
+        <h2>Alerta de Inconsistência na Transação de Saída</h2>
+        <p>Foram identificados produtos com situação de RFID incorreta (diferente de '1 - Em Andamento') em transações de saída atendidas. Por favor, verifiquem os itens abaixo:</p>
+        <table>
+            <tr>
+                <th>Transações</th>
+                <th>Data</th>
+                <th>Operador</th>
+                <th>Contagem</th>
+                <th>Produto</th>
+                <th>Código</th>
+                <th>Situação RFID</th>
+            </tr>
+    """
+    
+    for item in inconsistencias:
+        data_transacao_formatada = item['DT_TRANSACAO'].strftime('%d/%m/%Y %H:%M:%S')
+        corpo_html += f"""
+            <tr>
+                <td>{item['NR_TRANSACAO']}</td>
+                <td>{data_transacao_formatada}</td>
+                <td>{item['CD_OPERADOR']}</td>
+                <td>{item['NR_CONTAGEM']}</td>
+                <td>{item['CD_PRODUTO']}</td>
+                <td>{item['CD_RFID']}</td>
+                <td>{item['TP_SITUACAO']}</td>
+            </tr>                            
+    """
+    
+    corpo_html += """
+        </table>
+        <p><Ação recomendada:</b> Corrigir a situação dos códigos RFID no sistema para evitar problemas na conferência na matriz.</p>
+    </body>
+    </html>
+    """
+
+    # Configuração da mensagem
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = "Alerta: RFID com situação Incorreta em Transação de Saída"
+    msg['From'] = EMAIL_FROM
+    msg['To'] = ",".join(EMAIL_TO)
+
+    msg.attach(MIMEText(corpo_html, 'html'))
+
+    try:
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+            server.starttls() # Habilita segurança
+            server.login(EMAIL_USER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+            print(f"E-mail de alerta enviado com sucesso para: {','.join(EMAIL_TO)}")
+    except Exception as e:
+        print(f"Falha ao enviar e-mail: {e}")
+
+if __name__=="__main__":
+    print("Iniciando monitoramento de transações...")
+
+    transacoes_alertadas = set()
+
+    while True:
+        try:
+            resultados = verificar_transacoes()
+
+            if resultados:
+                novas_inconsistencias = []
+                for res in resultados:
+                    # Chave única para identificar a inconsistência
+                    chave_inconsistencia = (res['NR_TRANSACAO'], res['CD_RFID'])
+                    if chave_inconsistencia not in transacoes_alertadas:
+                        novas_inconsistencias.append(res)
+                        transacoes_alertadas.add(chave_inconsistencia)
+                
+                if novas_inconsistencias:
+                    print(f"Encontradas {len(novas_inconsistencias)} novas inconsistências. Enviando e-mail...")
+                    enviar_email(novas_inconsistencias)
+                else:
+                    print("Nenhuma nova inconsistência encontrada. Verificação concluída.")
+            else:
+                print("Nenhuma inconsistência encontrada. Verificação concluída.")
+            
+            # Espera em segundos para próxima verificação
+            time.sleep(60)
+
+        except KeyboardInterrupt:
+            print("Monitoramento interrompido pelo usuário.")
+            break
+        except Exception as e:
+            print(f"Ocorreu um erro inesperado no loop principal: {e}")
+            # Espera 5 minutos antes de tentar novamente em caso de erro grave
+            time.sleep(300)
