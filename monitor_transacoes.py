@@ -36,10 +36,19 @@ def verificar_transacoes():
                 t.nr_transacao,
                 t.dt_transacao,
                 t.cd_operador,
+                u.nm_login AS nm_operador,
                 tc.nr_contagem,
                 gc.cd_produto,
                 pcr.cd_rfid,
-                pcr.tp_situacao
+                -- pcr.tp_situacao
+                CASE pcr.tp_situacao
+                    WHEN 2 THEN '2 - Em Producao'
+                    WHEN 3 THEN '3 - Em Contagem'
+                    WHEN 4 THEN '4 - Encerrado'
+                    WHEN 5 THEN '5 - Agrupado'
+                    WHEN 6 THEN '6 - Cancelado'
+                    ELSE TO_CHAR(pcr.tp_situacao) || ' - Status Desconhecido'
+                END AS ds_situacao_rfid 
             
             FROM
                 TRA_TRANSACAO t
@@ -48,13 +57,18 @@ def verificar_transacoes():
             JOIN
                 GER_CONTAGEMI gc ON tc.nr_contagem = gc.nr_contagem AND t.cd_empresa = gc.cd_empresa
             JOIN
-                PRD_CODIGORFID pcr ON gc.cd_produto = pcr.cd_produto
+                PRD_CODIGORFID pcr ON gc.cd_barraprd = pcr.cd_rfid AND gc.cd_produto = pcr.cd_produto
+            JOIN 
+                ADM_USUARIO u ON t.cd_operador = u.cd_usuario
             WHERE
                 t.cd_empresa = 2
                 AND t.tp_situacao = 4
                 AND t.tp_operacao = 'S'
-                AND t.cd_operacao' IN (551, 556, 557)
+                AND t.cd_operacao IN (551, 556, 557)
                 AND pcr.tp_situacao <> 1
+                AND t.dt_transacao > TO_DATE('17/07/2025', 'DD/MM/YYYY')
+            ORDER BY
+                t.nr_transacao, pcr.cd_rfid -- Ordenação aprimorada
         """
         cursor.execute(query)
         resultados = cursor.fetchall()
@@ -98,7 +112,8 @@ def enviar_email(inconsistencias):
             <tr>
                 <th>Transações</th>
                 <th>Data</th>
-                <th>Operador</th>
+                <th>Cód. Operador</th>
+                <th>Nome Operador</th>
                 <th>Contagem</th>
                 <th>Produto</th>
                 <th>Código</th>
@@ -108,15 +123,19 @@ def enviar_email(inconsistencias):
     
     for item in inconsistencias:
         data_transacao_formatada = item['DT_TRANSACAO'].strftime('%d/%m/%Y %H:%M:%S')
+        # Usamos o .get() para evitar erro caso a coluna não venha por algum motivo
+        nome_operador = item.get('NM_OPERADOR', 'N/A')
+        situacao_rfid_desc = item.get('DS_SITUACAO_RFID', 'N/A')
         corpo_html += f"""
             <tr>
                 <td>{item['NR_TRANSACAO']}</td>
                 <td>{data_transacao_formatada}</td>
                 <td>{item['CD_OPERADOR']}</td>
+                <td>{nome_operador}</td>
                 <td>{item['NR_CONTAGEM']}</td>
                 <td>{item['CD_PRODUTO']}</td>
                 <td>{item['CD_RFID']}</td>
-                <td>{item['TP_SITUACAO']}</td>
+                <td>{situacao_rfid_desc}</td>
             </tr>                            
     """
     
