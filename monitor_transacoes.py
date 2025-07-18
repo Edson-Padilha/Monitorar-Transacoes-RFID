@@ -35,6 +35,7 @@ def verificar_transacoes():
             SELECT 
                 t.nr_transacao,
                 t.dt_transacao,
+                t.dt_cadastro,
                 t.cd_operador,
                 u.nm_login AS nm_operador,
                 tc.nr_contagem,
@@ -122,7 +123,7 @@ def enviar_email(inconsistencias):
     """
     
     for item in inconsistencias:
-        data_transacao_formatada = item['DT_TRANSACAO'].strftime('%d/%m/%Y %H:%M:%S')
+        data_transacao_formatada = item['DT_CADASTRO'].strftime('%d/%m/%Y %H:%M:%S')
         # Usamos o .get() para evitar erro caso a coluna não venha por algum motivo
         nome_operador = item.get('NM_OPERADOR', 'N/A')
         situacao_rfid_desc = item.get('DS_SITUACAO_RFID', 'N/A')
