@@ -67,7 +67,7 @@ def verificar_transacoes():
                 AND t.tp_operacao = 'S'
                 AND t.cd_operacao IN (551, 556, 557)
                 AND pcr.tp_situacao <> 1
-                AND t.dt_transacao > TO_DATE('17/07/2025', 'DD/MM/YYYY')
+                AND t.dt_transacao >= TRUNC(SYSDATE) --TO_DATE('22/07/2025', 'DD/MM/YYYY')
             ORDER BY
                 t.nr_transacao, pcr.cd_rfid -- Ordenação aprimorada
         """
