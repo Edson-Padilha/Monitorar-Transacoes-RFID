@@ -9,39 +9,35 @@ from dotenv import load_dotenv
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
 
-# --- Configurações do Banco de Dados e E-mail (carregadas do .env) ---
+# --- Configurações (sem alterações) ---
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_DSN = os.getenv("DB_DSN")
 EMAIL_HOST = os.getenv("EMAIL_HOST")
-EMAIL_PORT = int(os.getenv("email_port", 587))
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
-EMAIL_TO = os.getenv("EMAIL_TO").split(',') # Converte a string de e-mails em uma lista
+EMAIL_TO = os.getenv("EMAIL_TO").split(',')
 
 def verificar_transacoes():
     """
     Conecta ao banco de dados, executa a consulta e retorna os resultados.
     """
     try:
-        # Inicializa o cliente Oracle, se necessário
-        # cx_Oracle.init_oracle_client(lib_dir=r"C:\path\to\your\instantclient") # Descomente e ajuste o caminho se necessário
-
         connection = cx_Oracle.connect(user=DB_USER, password=DB_PASSWORD, dsn=DB_DSN)
         cursor = connection.cursor()
 
+        # ***** QUERY FINAL E SIMPLIFICADA *****
         query = """
-            SELECT 
+            SELECT
                 t.nr_transacao,
                 t.dt_transacao,
-                t.dt_cadastro,
                 t.cd_operador,
                 u.nm_login AS nm_operador,
                 tc.nr_contagem,
                 gc.cd_produto,
                 pcr.cd_rfid,
-                -- pcr.tp_situacao
                 CASE pcr.tp_situacao
                     WHEN 2 THEN '2 - Em Producao'
                     WHEN 3 THEN '3 - Em Contagem'
@@ -49,53 +45,47 @@ def verificar_transacoes():
                     WHEN 5 THEN '5 - Agrupado'
                     WHEN 6 THEN '6 - Cancelado'
                     ELSE TO_CHAR(pcr.tp_situacao) || ' - Status Desconhecido'
-                END AS ds_situacao_rfid 
-            
+                END AS ds_situacao_rfid
             FROM
                 TRA_TRANSACAO t
-            JOIN 
+            JOIN
                 TRA_TRANSACCONT tc ON t.nr_transacao = tc.nr_transacao AND t.cd_empresa = tc.cd_emptransacao
             JOIN
                 GER_CONTAGEMI gc ON tc.nr_contagem = gc.nr_contagem AND t.cd_empresa = gc.cd_empresa
             JOIN
                 PRD_CODIGORFID pcr ON gc.cd_barraprd = pcr.cd_rfid AND gc.cd_produto = pcr.cd_produto
-            JOIN 
+            JOIN
                 ADM_USUARIO u ON t.cd_operador = u.cd_usuario
             WHERE
                 t.cd_empresa = 2
                 AND t.tp_situacao = 4
                 AND t.tp_operacao = 'S'
                 AND t.cd_operacao IN (551, 556, 557)
-                AND pcr.tp_situacao <> 1
-                AND t.dt_transacao >= TRUNC(SYSDATE) --TO_DATE('22/07/2025', 'DD/MM/YYYY')
+                AND t.dt_transacao >= TRUNC(SYSDATE)
+                -- A regra de negócio final e simplificada:
+                AND pcr.tp_situacao NOT IN (1, 3, 4)
             ORDER BY
-                t.nr_transacao, pcr.cd_rfid -- Ordenação aprimorada
+                t.nr_transacao, pcr.cd_rfid
         """
         cursor.execute(query)
         resultados = cursor.fetchall()
 
-        # Obter os nomes das colunas para formatação
         colunas = [desc[0] for desc in cursor.description]
-        
         cursor.close()
         connection.close()
-
-        # Formatar resultados com uma lista de dicionários
+        
         resultados_formatados = [dict(zip(colunas, row)) for row in resultados]
         return resultados_formatados
-    
+
     except cx_Oracle.Error as error:
         print(f"Erro ao conectar ou executar a consulta no Oracle: {error}")
         return None
 
 def enviar_email(inconsistencias):
-    """
-    Formata e envia um e-mail com a lista de inconsistências.
-    """
+    # A função de envio de email não precisa de alterações
     if not inconsistencias:
         return
-    
-    # Monta o corpo do e-mail em HTML para melhor formatação
+
     corpo_html = """
     <html>
     <head>
@@ -108,25 +98,25 @@ def enviar_email(inconsistencias):
     </head>
     <body>
         <h2>Alerta de Inconsistência na Transação de Saída</h2>
-        <p>Foram identificados produtos com situação de RFID incorreta (diferente de '1 - Em Andamento') em transações de saída atendidas. Por favor, verifiquem os itens abaixo:</p>
+        <p>Foram identificados produtos com situação de RFID inválida para o processo de expedição (ex: Em Produção, Cancelado, etc.). Por favor, verifiquem os itens abaixo:</p>
         <table>
             <tr>
-                <th>Transações</th>
+                <th>Transação</th>
                 <th>Data</th>
                 <th>Cód. Operador</th>
                 <th>Nome Operador</th>
                 <th>Contagem</th>
                 <th>Produto</th>
-                <th>Código</th>
+                <th>Código RFID</th>
                 <th>Situação RFID</th>
             </tr>
     """
-    
+
     for item in inconsistencias:
-        data_transacao_formatada = item['DT_CADASTRO'].strftime('%d/%m/%Y %H:%M:%S')
-        # Usamos o .get() para evitar erro caso a coluna não venha por algum motivo
+        data_transacao_formatada = item['DT_TRANSACAO'].strftime('%d/%m/%Y %H:%M:%S')
         nome_operador = item.get('NM_OPERADOR', 'N/A')
         situacao_rfid_desc = item.get('DS_SITUACAO_RFID', 'N/A')
+
         corpo_html += f"""
             <tr>
                 <td>{item['NR_TRANSACAO']}</td>
@@ -137,51 +127,50 @@ def enviar_email(inconsistencias):
                 <td>{item['CD_PRODUTO']}</td>
                 <td>{item['CD_RFID']}</td>
                 <td>{situacao_rfid_desc}</td>
-            </tr>                            
-    """
-    
+            </tr>
+        """
+
     corpo_html += """
         </table>
-        <p><Ação recomendada:</b> Corrigir a situação dos códigos RFID no sistema para evitar problemas na conferência na matriz.</p>
+        <p><b>Ação recomendada:</b> Corrigir a situação dos códigos RFID no sistema para evitar problemas na conferência na filial.</p>
     </body>
     </html>
     """
 
-    # Configuração da mensagem
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = "Alerta: RFID com situação Incorreta em Transação de Saída"
+    msg['Subject'] = "Alerta: RFID com Situação Incorreta em Transação de Saída"
     msg['From'] = EMAIL_FROM
-    msg['To'] = ",".join(EMAIL_TO)
-
+    msg['To'] = ", ".join(EMAIL_TO)
+    
     msg.attach(MIMEText(corpo_html, 'html'))
 
     try:
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
-            server.starttls() # Habilita segurança
+            server.starttls()
             server.login(EMAIL_USER, EMAIL_PASSWORD)
             server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
-            print(f"E-mail de alerta enviado com sucesso para: {','.join(EMAIL_TO)}")
+            print(f"E-mail de alerta enviado com sucesso para: {', '.join(EMAIL_TO)}")
     except Exception as e:
         print(f"Falha ao enviar e-mail: {e}")
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
+    # O loop principal não precisa de alterações
     print("Iniciando monitoramento de transações...")
-
-    transacoes_alertadas = set()
-
+    transacoes_alertadas = set() 
+    
     while True:
         try:
             resultados = verificar_transacoes()
-
+            
             if resultados:
                 novas_inconsistencias = []
                 for res in resultados:
-                    # Chave única para identificar a inconsistência
                     chave_inconsistencia = (res['NR_TRANSACAO'], res['CD_RFID'])
                     if chave_inconsistencia not in transacoes_alertadas:
                         novas_inconsistencias.append(res)
                         transacoes_alertadas.add(chave_inconsistencia)
-                
+
                 if novas_inconsistencias:
                     print(f"Encontradas {len(novas_inconsistencias)} novas inconsistências. Enviando e-mail...")
                     enviar_email(novas_inconsistencias)
@@ -189,14 +178,12 @@ if __name__=="__main__":
                     print("Nenhuma nova inconsistência encontrada. Verificação concluída.")
             else:
                 print("Nenhuma inconsistência encontrada. Verificação concluída.")
-            
-            # Espera em segundos para próxima verificação
-            time.sleep(60)
 
+            time.sleep(60) 
+        
         except KeyboardInterrupt:
             print("Monitoramento interrompido pelo usuário.")
             break
         except Exception as e:
             print(f"Ocorreu um erro inesperado no loop principal: {e}")
-            # Espera 5 minutos antes de tentar novamente em caso de erro grave
             time.sleep(300)
