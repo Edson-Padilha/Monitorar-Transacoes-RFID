@@ -20,6 +20,34 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO").split(',')
 
+# ===== NOVAS CONSTANTES PARA O LOG =====
+CODIGO_ROTINA = 7
+STATUS_INICIO = 1
+STATUS_FIM = 2
+INTERVALO_SEGUNDOS = 60
+
+def registrar_log_execucao(codigo_rotina , status):
+    """
+    Conecta ao banco e chama a procedure para registrar o início ou fim da execução.
+    """
+    connection = None
+    try:
+        connection = cx_Oracle.connect(user=DB_USER, password=DB_PASSWORD, dsn=DB_DSN)
+        cursor = connection.cursor()
+
+        # Define o nome do status para uma mensagem de log mais clara
+        nome_status = "INÍCIO" if status == STATUS_INICIO else "FIM"
+
+        print(f"Registrando log de {nome_status} para a rotina {codigo_rotina}...")
+        cursor.callproc("bgintegra.P_BGR_HIST_ROTINAS_INT", [codigo_rotina, status])
+        print("Log registrado com sucesso.")
+    
+    except cx_Oracle.Error as error:
+        print(f"ERRO ao registrar log no banco de dados: {error}")
+    finally:
+        if connection:
+            connection.close()
+
 def verificar_transacoes():
     """
     Conecta ao banco de dados, executa a consulta e retorna os resultados.
@@ -161,6 +189,10 @@ if __name__ == "__main__":
     
     while True:
         try:
+            # --- REGISTRA O INÍCIO DA EXECUÇÃO ---
+            registrar_log_execucao(CODIGO_ROTINA, STATUS_INICIO)
+
+            # --- REALIZA O TRABALHO PRINCIPAL ---
             resultados = verificar_transacoes()
             
             if resultados:
@@ -178,8 +210,11 @@ if __name__ == "__main__":
                     print("Nenhuma nova inconsistência encontrada. Verificação concluída.")
             else:
                 print("Nenhuma inconsistência encontrada. Verificação concluída.")
+            # REGISTRA O FIM DA EXECUÇÃO ---
+            registrar_log_execucao(CODIGO_ROTINA, STATUS_FIM)
 
-            time.sleep(60) 
+            print(f"Ciclo de verificação concluído. Aguardando {INTERVALO_SEGUNDOS} segundos para o próximo...")
+            time.sleep(INTERVALO_SEGUNDOS) 
         
         except KeyboardInterrupt:
             print("Monitoramento interrompido pelo usuário.")
